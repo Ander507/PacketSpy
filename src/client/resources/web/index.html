@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PacketSpy 2.1 // ANALYZER</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --font-main: 'JetBrains Mono', monospace;
+            --bg-color: #0d1117;
+            --text-color: #c9d1d9;
+            --accent: #58a6ff;
+            --accent-hover: #1f6feb;
+            --header-bg: #161b22;
+            --panel-bg: #0d1117;
+            --border-color: #30363d;
+            --success: #238636;
+            --danger: #da3633;
+            --rx-color: #7ee787;
+            --tx-color: #f0883e;
+            --dim-color: #8b949e;
+            --selection-bg: #1f6feb44;
+            --scrollbar-bg: #161b22;
+            --scrollbar-thumb: #30363d;
+        }
+
+        /* Themes */
+        .theme-hacker {
+            --bg-color: #000000;
+            --text-color: #00ff00;
+            --accent: #00ff00;
+            --accent-hover: #00cc00;
+            --header-bg: #0a0a0a;
+            --panel-bg: #000000;
+            --border-color: #003300;
+            --success: #00ff00;
+            --danger: #ff0000;
+            --rx-color: #00ff00;
+            --tx-color: #008f00;
+            --dim-color: #005500;
+            --scrollbar-bg: #001100;
+            --scrollbar-thumb: #003300;
+        }
+
+        .theme-solarized {
+            --bg-color: #002b36;
+            --text-color: #839496;
+            --accent: #268bd2;
+            --accent-hover: #2aa198;
+            --header-bg: #073642;
+            --panel-bg: #002b36;
+            --border-color: #586e75;
+            --success: #859900;
+            --danger: #dc322f;
+            --rx-color: #2aa198;
+            --tx-color: #cb4b16;
+            --dim-color: #586e75;
+            --scrollbar-bg: #073642;
+            --scrollbar-thumb: #586e75;
+        }
+
+        .theme-light {
+             --bg-color: #f7f6f3; /* Warm off-white, like Notion */
+             --text-color: #37352f;
+             --accent: #e16b16; /* Soft orange */
+             --accent-hover: #bf560e;
+             --header-bg: #eBE8E4; /* Slightly darker warmth */
+             --panel-bg: #f7f6f3;
+             --border-color: #dddac9;
+             --success: #468652;
+             --danger: #cf4f54;
+             --rx-color: #1a7fbb;
+             --tx-color: #d95e33;
+             --dim-color: #9b9a97;
+             --scrollbar-bg: #f7f6f3;
+             --scrollbar-thumb: #dcd9ce;
+        }
+
+        /* Base */
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-main);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+            font-size: 13px; /* Slightly larger base size */
+            transition: background 0.3s, color 0.3s;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 12px; height: 12px; } /* Easier to grab */
+        ::-webkit-scrollbar-track { background: var(--scrollbar-bg); }
+        ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; border: 3px solid var(--scrollbar-bg); }
+        ::-webkit-scrollbar-thumb:hover { background: var(--dim-color); }
+
+        /* Mobile Optimization */
+        @media (max-width: 768px) {
+            header { padding: 8px 10px; }
+            h1 { font-size: 14px; }
+            #toolbar { padding: 5px; gap: 5px; flex-direction: column; align-items: stretch; height: auto; }
+
+            .control-group {
+                border-right: none;
+                border-bottom: 1px solid var(--border-color);
+                padding: 5px 0;
+                justify-content: space-between;
+            }
+            .control-group:last-child { border-bottom: none; }
+
+            /* Make inputs buttons easier to tap */
+            button, select, input[type="text"] { height: 36px; font-size: 12px; }
+            input[type="text"] { width: 100%; min-width: 0; }
+
+            /* Wrap buttons */
+            .control-group button { flex: 1; }
+
+            /* Hide non-critical columns/elements if needed */
+            .packet-header .time { font-size: 9px; min-width: 50px; }
+
+            /* Increase hit area for packets */
+            .packet-header { padding: 8px 5px; min-height: 30px; }
+        }
+        ::-webkit-scrollbar-track { background: var(--scrollbar-bg); }
+        ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 5px; border: 2px solid var(--scrollbar-bg); }
+        ::-webkit-scrollbar-thumb:hover { background: var(--dim-color); }
+
+        /* Header */
+        header {
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 10;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 800;
+            color: var(--accent);
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #status-indicator {
+            width: 10px;
+            height: 10px;
+            background: var(--danger);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--danger);
+            transition: all 0.5s;
+        }
+
+        #status-indicator.connected {
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+
+        #status-text {
+            font-size: 11px;
+            color: var(--dim-color);
+            font-weight: 600;
+        }
+
+        /* Controls */
+        #toolbar {
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 8px 15px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            z-index: 9;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+            padding-right: 10px;
+            border-right: 1px solid var(--border-color);
+        }
+
+        .control-group:last-child {
+            border-right: none;
+        }
+
+        /* Inputs & Buttons */
+        button, select, input[type="text"] {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 11px;
+            outline: none;
+            transition: all 0.15s ease;
+            height: 30px;
+            box-sizing: border-box;
+        }
+
+        button:hover, select:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            cursor: pointer;
+        }
+
+        button.active {
+            background: var(--accent);
+            color: #fff; /* Always white on active accent for contrast */
+            border-color: var(--accent);
+        }
+
+        input[type="text"] {
+            min-width: 200px;
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--selection-bg);
+        }
+
+        /* Log Area */
+        #log-container {
+            flex: 1;
+            overflow-y: auto;
+            position: relative;
+            background: var(--bg-color);
+            scroll-behavior: auto; /* Disabled smooth scroll for performance on logs */
+        }
+
+        #log {
+             padding-bottom: 20px;
+        }
+
+        .packet {
+            display: flex;
+            flex-direction: column;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 12px;
+            will-change: background;
+        }
+
+        .packet:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .packet-header {
+            display: flex;
+            align-items: center;
+            padding: 4px 8px;
+            cursor: pointer;
+            gap: 10px;
+            user-select: none;
+            min-height: 20px;
+        }
+
+        .packet-header .time { color: var(--dim-color); font-size: 10px; min-width: 70px; font-variant-numeric: tabular-nums; }
+        .packet-header .dir { font-weight: 800; min-width: 30px; }
+        .packet-header .dir.rx { color: var(--rx-color); }
+        .packet-header .dir.tx { color: var(--tx-color); }
+        .packet-header .name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .packet-header .count-badge {
+            background: var(--accent); color: #fff;
+            padding: 1px 6px; border-radius: 10px;
+            font-size: 10px; opacity: 0.9; margin-right: 5px;
+            font-weight: bold;
+        }
+
+        .btn-silence {
+            background: transparent;
+            border: none;
+            color: var(--dim-color);
+            padding: 0 4px;
+            font-size: 14px;
+        }
+        .btn-silence:hover {
+            color: var(--danger);
+            border-color: transparent;
+        }
+
+        .packet-details {
+            display: none;
+            padding: 10px;
+            background: rgba(0,0,0,0.1);
+            font-size: 11px;
+            color: var(--text-color);
+            overflow-x: auto;
+            white-space: pre-wrap;
+            border-top: 1px dashed var(--border-color);
+            border-left: 2px solid var(--accent);
+            margin: 0 10px 5px 10px;
+        }
+
+        .packet.expanded .packet-details { display: block; }
+
+        /* Utility */
+        .hidden { display: none !important; }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: none; align-items: center; justify-content: center;
+            z-index: 100;
+            backdrop-filter: blur(2px);
+        }
+        .modal {
+            background: var(--header-bg);
+            border: 1px solid var(--accent);
+            width: 400px; max-height: 80vh;
+            display: flex; flex-direction: column;
+            border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+        .modal-header { padding: 10px 15px; border-bottom: 1px solid var(--border-color); font-weight: bold; font-size: 14px; color: var(--accent); }
+        .modal-body { padding: 15px; overflow-y: auto; flex: 1; }
+        .modal-footer { padding: 10px 15px; border-top: 1px solid var(--border-color); text-align: right; }
+
+        .silenced-item {
+            display: flex; justify-content: space-between;
+            padding: 5px 8px; border-bottom: 1px solid var(--border-color);
+            font-size: 11px;
+        }
+
+        .empty-msg {
+            color: var(--dim-color); font-style: italic; text-align: center; padding: 20px;
+        }
+
+    </style>
+</head>
+<body class="">
+    <header>
+        <h1><div id="status-indicator"></div> PacketSpy 2.1 <span style="font-weight: 400; opacity: 0.5;">// MONITOR</span></h1>
+        <div id="status-text">CONNECTING...</div>
+    </header>
+
+    <div id="toolbar">
+        <div class="control-group">
+            <button id="btn-pause" onclick="togglePause()">PAUSE</button>
+            <button onclick="clearLog()">CLEAR</button>
+            <button onclick="saveLog()">EXPORT</button>
+        </div>
+        <div class="control-group">
+            <select id="theme-selector" onchange="changeTheme(this.value)">
+                <option value="default">Default Dark</option>
+                <option value="hacker">Hacker Green</option>
+                <option value="solarized">Solarized</option>
+                <option value="light">Light Mode</option>
+            </select>
+        </div>
+        <div class="control-group" style="flex: 1; min-width: 250px;">
+            <input type="text" id="filter-input" placeholder="Search... (e.g. 'position')" onkeyup="scheduleFilter()">
+            <button id="btn-regex" onclick="toggleRegex()" title="Regex Mode">.*</button>
+            <select id="category-filter" onchange="scheduleFilter()">
+                <option value="ALL">ALL CATEGORIES</option>
+                <option value="PLAYER">PLAYER</option>
+                <option value="GUI">GUI</option>
+                <option value="ENTITY">ENTITY</option>
+                <option value="WORLD">WORLD</option>
+                <option value="MISC">MISC</option>
+            </select>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 10px; cursor: pointer; user-select: none;">
+                <input type="checkbox" id="chk-in" checked onchange="scheduleFilter()"> RX
+            </label>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 10px; cursor: pointer; user-select: none;">
+                <input type="checkbox" id="chk-out" checked onchange="scheduleFilter()"> TX
+            </label>
+        </div>
+        <div class="control-group">
+           <button id="btn-movement" onclick="toggleMovement()">MOV: ON</button>
+           <button id="btn-stack" onclick="toggleStack()" class="active">STACK: ON</button>
+           <button onclick="openSilencedModal()">MUTE LIST</button>
+        </div>
+    </div>
+
+    <div id="log-container">
+        <div id="log"></div>
+    </div>
+
+    <!-- Modal for Silenced Packets -->
+    <div id="modal-overlay" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">Silenced Packets</div>
+            <div class="modal-body">
+                <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+                    <input type="text" id="silence-input" placeholder="Packet Name (exact match)" style="flex:1;">
+                    <button onclick="addSilenceFromInput()">Block</button>
+                </div>
+                <div id="silenced-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeSilencedModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- PacketSpy v3.0 Core ---
+
+        // Config & State
+        const MAX_LOG_SIZE = 5000;
+        let ws;
+        let isPaused = false;
+        let isRegex = false;
+        let autoScroll = true;
+        let logPlayerMovement = true;
+        let stackHighFrequency = true; // New setting
+        let silencedPackets = [];
+
+        // Sorting / Batching
+        let packetCounter = 0;
+        let lastPacketSignature = null;
+        let lastPacketElement = null;
+        let lastPacketCount = 1;
+
+        // Filter Debounce
+        let filterTimeout = null;
+
+        // Elements
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const logDiv = document.getElementById('log');
+        const logContainer = document.getElementById('log-container');
+        const btnPause = document.getElementById('btn-pause');
+        const btnMovement = document.getElementById('btn-movement');
+        const filterInput = document.getElementById('filter-input');
+        const btnRegex = document.getElementById('btn-regex');
+        const categoryFilter = document.getElementById('category-filter');
+        const chkIn = document.getElementById('chk-in');
+        const chkOut = document.getElementById('chk-out');
+        const btnStack = document.getElementById('btn-stack');
+
+        // --- Theme System ---
+        function changeTheme(theme) {
+            document.body.className = theme === 'default' ? '' : `theme-${theme}`;
+            localStorage.setItem('packetspy-theme', theme);
+        }
+
+        // Load saved theme
+        const savedTheme = localStorage.getItem('packetspy-theme');
+        if (savedTheme) {
+            changeTheme(savedTheme);
+            document.getElementById('theme-selector').value = savedTheme;
+        }
+
+        // --- WebSocket ---
+        function connect() {
+            const wsHost = window.location.hostname || 'localhost';
+            ws = new WebSocket(`ws://${wsHost}:8887`);
+
+            ws.onopen = () => {
+                statusIndicator.classList.add('connected');
+                statusText.textContent = 'ONLINE';
+                logSystem('UPLINK ESTABLISHED');
+            };
+
+            ws.onclose = () => {
+                statusIndicator.classList.remove('connected');
+                statusText.textContent = 'DISCONNECTED';
+                logSystem('CONNECTION LOST. RECONNECTING...');
+                setTimeout(connect, 3000);
+            };
+
+            ws.onerror = (err) => console.error(err);
+
+            ws.onmessage = (event) => {
+                if (isPaused) return;
+
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'config') {
+                        syncConfig(data);
+                    } else if (data.direction) {
+                        handlePacket(data);
+                    } else if (data.error) {
+                         logSystem('ERROR: ' + data.error);
+                    } else {
+                        // Fallback log
+                        logSystem(JSON.stringify(data));
+                    }
+                } catch (e) {
+                     // Legacy string format support
+                     handleLegacyMessage(event.data);
+                }
+            };
+        }
+
+        function syncConfig(data) {
+             logPlayerMovement = data.logPlayerMovementPackets;
+             if (data.silencedPackets) {
+                 silencedPackets = data.silencedPackets;
+                 renderSilencedList();
+             }
+             updateMovementButton();
+        }
+
+        function handleLegacyMessage(msg) {
+             if (msg.startsWith('IN:')) handlePacket({ direction: 'IN', name: msg.substring(4), data: {} });
+             else if (msg.startsWith('OUT:')) handlePacket({ direction: 'OUT', name: msg.substring(5), data: {} });
+             else logSystem(msg);
+        }
+
+        // --- Packet Logic ---
+        function handlePacket(packet) {
+            const dataHash = JSON.stringify(packet.data); // Simple content hash
+            // Aggregation check
+            // Only aggregate if name + direction + DATA match (unless strictly spammy like movement?)
+            // Actually, for things like "SlotClick", if the data differs, we MUST NOT merge.
+            // So we include dataHash in the signature.
+
+            let signature = `${packet.direction}:${packet.name}`;
+            if (!stackHighFrequency) {
+                // If stacking is OFF, just make signature unique
+                signature += `:${packetCounter}`;
+            } else {
+                 signature += `:${dataHash}`;
+            }
+
+            // Only aggregate if we are at the bottom (latest)
+            if (lastPacketSignature === signature && lastPacketElement && lastPacketElement.isConnected) {
+                lastPacketCount++;
+                const countBadge = lastPacketElement.querySelector('.count-badge');
+                if (countBadge) {
+                   countBadge.textContent = `${lastPacketCount}x`;
+                } else {
+                    const header = lastPacketElement.querySelector('.packet-header');
+                    // Insert before the silence button
+                    const silenceBtn = lastPacketElement.querySelector('.btn-silence');
+                    const badge = document.createElement('span');
+                    badge.className = 'count-badge';
+                    badge.textContent = `${lastPacketCount}x`;
+                    header.insertBefore(badge, silenceBtn);
+                }
+
+                // Update timestamp
+                const now = new Date();
+                lastPacketElement.dataset.timestamp = now.getTime();
+                lastPacketElement.querySelector('.time').textContent = formatTime(now);
+
+                scrollToBottomLazy();
+                return;
+            }
+
+            // New Packet
+            lastPacketSignature = signature;
+            lastPacketCount = 1;
+
+            const div = createPacketElement(packet);
+            lastPacketElement = div;
+
+            // Apply current filters immediately
+            if (!matchesFilter(div)) {
+                div.classList.add('hidden');
+            }
+
+            logDiv.appendChild(div);
+
+            // Cleanup old
+            if (logDiv.children.length > MAX_LOG_SIZE) {
+                if (logDiv.firstChild === lastPacketElement) lastPacketElement = null;
+                logDiv.removeChild(logDiv.firstChild);
+            }
+
+            scrollToBottomLazy();
+        }
+
+        function createPacketElement(packet) {
+            const now = new Date();
+            const div = document.createElement('div');
+            div.className = 'packet';
+
+            const fullClass = packet.class || '';
+            const simpleClass = fullClass.split('.').pop();
+
+            // Search index now includes class name
+            div.dataset.content = (packet.name + ' ' + fullClass + ' ' + simpleClass).toLowerCase();
+            div.dataset.type = packet.direction === 'IN' ? 'RX' : 'TX';
+            div.dataset.category = getCategory(packet.name) === 'MISC' ? getCategory(simpleClass) : getCategory(packet.name);
+            div.dataset.timestamp = now.getTime();
+
+            const dirClass = packet.direction === 'IN' ? 'rx' : 'tx';
+            const arrow = packet.direction === 'IN' ? 'RX >>' : 'TX <<';
+
+            // Display: ID (ClassName)
+            const displayName = packet.name === simpleClass ? packet.name : `${packet.name} <span style="opacity:0.5; font-weight:400;">(${simpleClass})</span>`;
+
+            div.innerHTML = `
+                <div class="packet-header" onclick="toggleDetails(this)" title="${fullClass}">
+                    <span class="time">${formatTime(now)}</span>
+                    <span class="dir ${dirClass}">${arrow}</span>
+                    <span class="name">${displayName}</span>
+                    <button class="btn-silence" onclick="silencePacket('${packet.name}', event)" title="Silence">×</button>
+                </div>
+                <div class="packet-details">${JSON.stringify(packet.data, null, 2)}</div>
+            `;
+            return div;
+        }
+
+        function logSystem(msg) {
+             const div = document.createElement('div');
+             div.className = 'packet';
+             div.style.borderLeft = '3px solid var(--dim-color)';
+             div.innerHTML = `
+                <div class="packet-header">
+                    <span class="time">${formatTime(new Date())}</span>
+                    <span class="dir" style="color:var(--dim-color)">SYS</span>
+                    <span class="name" style="font-style:italic; color:var(--text-color)">${msg}</span>
+                </div>
+             `;
+             logDiv.appendChild(div);
+             scrollToBottomLazy();
+        }
+
+        function formatTime(date) {
+            return date.toLocaleTimeString('en-US', { hour12: false }) + '.' + String(date.getMilliseconds()).padStart(3, '0');
+        }
+
+        function toggleDetails(header) {
+            header.parentElement.classList.toggle('expanded');
+        }
+
+        let scrollTimeout;
+        function scrollToBottomLazy() {
+            if (!autoScroll) return;
+            // Debounce scroll to avoid layout trashing on every packet
+            if (scrollTimeout) return;
+            scrollTimeout = requestAnimationFrame(() => {
+                 logContainer.scrollTop = logContainer.scrollHeight;
+                 scrollTimeout = null;
+            });
+        }
+
+        // Auto-scroll detection
+        logContainer.addEventListener('scroll', () => {
+            const threshold = 50;
+            const position = logContainer.scrollTop + logContainer.offsetHeight;
+            const height = logContainer.scrollHeight;
+            autoScroll = position > height - threshold;
+        });
+
+        // --- Filtering ---
+        function getCategory(name) {
+            name = name.toLowerCase();
+            if (name.includes('player') || name.includes('move') || name.includes('hand') || name.includes('interact') || name.includes('position') || name.includes('rotation')) return 'PLAYER';
+            if (name.includes('entity') || name.includes('mob') || name.includes('vehicle') || name.includes('spawn')) return 'ENTITY';
+            if (name.includes('window') || name.includes('screen') || name.includes('slot') || name.includes('recipe') || name.includes('merchant') || name.includes('inventory') || name.includes('click') || name.includes('container') || name.includes('gui') || name.includes('close')) return 'GUI';
+            if (name.includes('chunk') || name.includes('block') || name.includes('world') || name.includes('light') || name.includes('update') || name.includes('particle')) return 'WORLD';
+            return 'MISC';
+        }
+
+        function matchesFilter(div) {
+            // System messages (no dataset properties usually) - keep them?
+            if (!div.dataset.type) return true;
+
+            const searchText = filterInput.value.toLowerCase();
+            const content = div.dataset.content;
+            const category = div.dataset.category;
+            const type = div.dataset.type;
+
+            if (type === 'RX' && !chkIn.checked) return false;
+            if (type === 'TX' && !chkOut.checked) return false;
+
+            const catFilter = categoryFilter.value;
+            if (catFilter !== 'ALL' && category !== catFilter) return false;
+
+            if (searchText) {
+                if (isRegex) {
+                     try {
+                         if (!new RegExp(searchText, 'i').test(content)) return false;
+                     } catch(e) { return false; }
+                } else {
+                    if (!content.includes(searchText)) return false;
+                }
+            }
+            return true;
+        }
+
+        function scheduleFilter() {
+            if (filterTimeout) clearTimeout(filterTimeout);
+            filterTimeout = setTimeout(applyFilters, 200); // 200ms debounce
+        }
+
+        function applyFilters() {
+            // Batch DOM updates by hiding/showing everything at once?
+            // Actually iterating 2000 items is fast enough in JS, but touching DOM is slow.
+            // Using requestAnimationFrame to unblock UI
+            requestAnimationFrame(() => {
+                const packets = Array.from(logDiv.children);
+                packets.forEach(div => {
+                    // Skip if system message
+                    if (!div.dataset.content) return;
+
+                    if (matchesFilter(div)) {
+                        div.classList.remove('hidden');
+                    } else {
+                        div.classList.add('hidden');
+                    }
+                });
+            });
+        }
+
+        function toggleRegex() {
+            isRegex = !isRegex;
+            btnRegex.classList.toggle('active', isRegex);
+            applyFilters();
+        }
+
+        // --- Controls ---
+        function toggleStack() {
+            stackHighFrequency = !stackHighFrequency;
+            const btn = document.getElementById('btn-stack');
+            btn.textContent = stackHighFrequency ? 'STACK: ON' : 'STACK: OFF';
+            btn.classList.toggle('active', stackHighFrequency);
+            lastPacketSignature = null; // Reset stacking
+        }
+
+        function toggleMovement() {
+            logPlayerMovement = !logPlayerMovement;
+            ws.send(JSON.stringify({ action: 'toggleMovement', value: logPlayerMovement }));
+            updateMovementButton();
+        }
+
+        function updateMovementButton() {
+            btnMovement.textContent = `MOV: ${logPlayerMovement ? 'ON' : 'OFF'}`;
+            btnMovement.classList.toggle('active', logPlayerMovement);
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            btnPause.classList.toggle('active', isPaused);
+            btnPause.textContent = isPaused ? 'RESUME' : 'PAUSE';
+        }
+
+        function clearLog() {
+            logDiv.innerHTML = '';
+            packetCounter = 0;
+            lastPacketSignature = null;
+            lastPacketElement = null;
+        }
+
+        function saveLog() {
+            const packets = Array.from(logDiv.children).filter(div => !div.classList.contains('hidden') && div.dataset.content);
+            if (packets.length === 0) { alert("Nothing to export."); return; }
+
+            let txt = `PacketSpy Export - ${new Date().toLocaleString()}\n\n`;
+            packets.forEach(p => {
+                const time = p.querySelector('.time').textContent;
+                const dir = p.dataset.type === 'RX' ? 'IN ' : 'OUT';
+                const name = p.querySelector('.name').textContent;
+                const details = p.querySelector('.packet-details').textContent;
+                txt += `${time} | ${dir} | ${name}\n${details}\n${'-'.repeat(40)}\n`;
+            });
+
+            const blob = new Blob([txt], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `packetspy_${new Date().getTime()}.txt`;
+            a.click();
+        }
+
+        // --- Silence Modal ---
+        const modalOverlay = document.getElementById('modal-overlay');
+        const silencedList = document.getElementById('silenced-list');
+        const silenceInput = document.getElementById('silence-input');
+
+        function openSilencedModal() {
+            modalOverlay.style.display = 'flex';
+            renderSilencedList();
+        }
+
+        function closeSilencedModal() {
+            modalOverlay.style.display = 'none';
+        }
+
+        function renderSilencedList() {
+            silencedList.innerHTML = '';
+            if (silencedPackets.length === 0) {
+                silencedList.innerHTML = '<div class="empty-msg">No silenced packets.<br>Use "Block" or click [x] on a packet.</div>';
+                return;
+            }
+            silencedPackets.forEach(name => {
+                const div = document.createElement('div');
+                div.className = 'silenced-item';
+                div.innerHTML = `<span>${name}</span> <button onclick="unsilencePacket('${name}')" style="color:var(--danger)">Remove</button>`;
+                silencedList.appendChild(div);
+            });
+        }
+
+        function addSilenceFromInput() {
+            const val = silenceInput.value.trim();
+            if (val) {
+                silencePacket(val);
+                silenceInput.value = '';
+            }
+        }
+
+        function silencePacket(name, evt) {
+            if (evt) evt.stopPropagation();
+            ws.send(JSON.stringify({ action: 'silencePacket', packetName: name }));
+            // Server should reply with config update, triggering renderSilencedList if modal open
+        }
+
+        function unsilencePacket(name) {
+            ws.send(JSON.stringify({ action: 'unsilencePacket', packetName: name }));
+        }
+
+        // Init
+        connect();
+
+    </script>
+</body>
+</html>
+

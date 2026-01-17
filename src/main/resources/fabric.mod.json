@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "packetspy",
+  "version": "${version}",
+  "name": "PacketSpy",
+  "description": "This adds console / log to spy on packets",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-datagen": [
+      "org.ander507.packetspy.client.PacketspyDataGenerator"
+    ],
+    "client": [
+      "org.ander507.packetspy.client.PacketspyClient"
+    ]
+  },
+  "mixins": [
+    "packetspy.mixins.json",
+    {
+      "config": "packetspy.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": ">=1.21 <=1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
