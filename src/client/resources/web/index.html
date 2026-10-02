@@ -318,7 +318,7 @@ button, input { font: inherit; color: inherit; }
     .cats { padding: 6px 12px; }
     .filters { padding-right: 12px; gap: 6px; }
     .sort span { display: none; }
-    .sort select { max-width: 120px; }
+    .sort select { padding: 0 4px; font-size: 13px; }
     .row { grid-template-columns: 0 30px minmax(0, 1fr) auto; gap: 8px; padding: 0 12px; font-size: 14px; }
     .row .t { visibility: hidden; }
     .row .n i { display: none; }
@@ -452,7 +452,7 @@ const CATEGORY_RULES = [
     ['chat', /chat|command|title|action_bar|tab_list/],
     ['inventory', /container|slot|recipe|merchant|cooldown|carried|creative|book|sign|anvil|beacon|enchant|trade|screen|cursor|inventory/],
     ['entity', /entit|mob|spawn|passenger|leash|take_item|animate|hurt|damage|rotate_head|projectile|vehicle|minecart|boat|equipment/],
-    ['player', /player|move|interact|use_item|swing|pick|abilities|respawn|health|experience|camera|look_at|teleport|client_command|input/],
+    ['player', /player|move|interact|attack|use_item|swing|pick|abilities|respawn|health|experience|camera|look_at|teleport|client_command|input/],
     ['connection', /intention|hello|login|keep_alive|ping|pong|custom|cookie|transfer|disconnect|configuration|known_packs|registry|tags|features|resource_pack|information|server_links|bundle|status|client_tick|code_of_conduct|dialog|key/],
     ['world', /chunk|block|level|light|world|particle|sound|explode|time|weather|game_event|border|biome|section|map|forget|structure|jigsaw|tick/],
 ];
@@ -687,7 +687,7 @@ function setSort(sort) {
     save('sort', sort);
     state.follow = isLive();
     state.unseen = 0;
-    if (!isLive()) els.list.scrollTop = 0;
+    if (sort !== 'bottom') els.list.scrollTop = 0;
     requestResort(true);
 }
 
@@ -704,7 +704,9 @@ function rebuildView() {
     state.view = state.packets.filter(matches);
     state.unseen = 0;
     state.follow = isLive();
-    if (!isLive()) els.list.scrollTop = 0;
+    // Jump to the top right away: a scroll event from the list shrinking would otherwise
+    // look like the user scrolled away from the newest packets
+    if (state.sort !== 'bottom') els.list.scrollTop = 0;
     requestResort(true);
 }
 
