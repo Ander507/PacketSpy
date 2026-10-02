@@ -2,9 +2,9 @@
   "required": true,
   "minVersion": "0.8",
   "package": "org.ander507.packetspy.mixin.client",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "${mixin_java_level}",
   "client": [
-    "ClientConnectionMixin"
+    "ConnectionMixin"
   ],
   "injectors": {
     "defaultRequire": 1

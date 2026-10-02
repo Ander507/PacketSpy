@@ -1,8 +1,10 @@
 # PacketSpy
 
-**PacketSpy** is a lightweight network debugging utility designed for Minecraft Fabric (version 1.21.1). It serves as a real-time packet inspector, allowing developers and power users to monitor the network traffic between the client and the server.
+**PacketSpy** is a lightweight network debugging utility designed for Minecraft Fabric (1.21 to 26.3). It serves as a real-time packet inspector, allowing developers and power users to monitor the network traffic between the client and the server, in singleplayer and on multiplayer servers.
 
-The core functionality revolves around intercepting both transmitted (TX) and received (RX) packets. Instead of relying solely on the in-game console, PacketSpy hosts a local web server using `Java-WebSocket`. This provides a clean, external web interface accessible via a browser (defaulting to `http://localhost:8887`), where packet data is streamed live.
+The core functionality revolves around intercepting both transmitted (TX) and received (RX) packets. Instead of relying solely on the in-game console, PacketSpy hosts a local web server using `Java-WebSocket`. This provides a clean, external web interface accessible via a browser (press **F12** in game, or open `http://127.0.0.1:8888`), where packet data is streamed live.
+
+By default the web UI only accepts connections from your own PC. To watch from a phone on the same network, set `"allowLanAccess": true` in `config/packetspy.json`.
 
 Key features include:
 *   **Live Traffic Monitoring:** View packet names and timestamps as they occur.
@@ -12,18 +14,17 @@ Key features include:
 *   **Easy Export:** Export captured packets to a text file for analysis.
 
 ## Building
-To build the mod for Minecraft 1.21.x (compatible with 1.21.0 - 1.21.5+):
-1. Run `build_release.bat` (Windows).
-2. Check the `release` folder for the JAR file.
+Building needs JDK 25 (it also builds the Java 21 jars for 1.21.x).
+1. Run `build_release.bat` (Windows). It builds one jar per version range listed in `versions.json`.
+2. Check the `release` folder for the JAR files.
 
-Currently at version **2.3**, the project is built using Gradle and integrates seamlessly with the Fabric Loader ecosystem.
+To build a single jar: `gradlew releaseJar -Ptarget=1.21.11` (target names are in `versions.json`).
+`check_versions.bat` compiles every jar against every Minecraft version it claims to support.
+
+Currently at version **2.4**, the project is built using Gradle and integrates seamlessly with the Fabric Loader ecosystem.
 
 ## Supported Versions
-*   **1.21**
-*   **1.21.1**
-*   **1.21.2**
-*   **1.21.3**
-*   **1.21.4**
-*   **1.21.5**
+*   **1.21 – 1.21.11**
+*   **26.1 – 26.3**
 
-See `SUPPORTED_VERSIONS.md` for more details.
+See `SUPPORTED_VERSIONS.md` for which jar to use.

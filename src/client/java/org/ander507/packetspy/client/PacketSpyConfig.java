@@ -2,56 +2,72 @@ package org.ander507.packetspy.client;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.loader.api.FabricLoader;
 
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-
 @Environment(EnvType.CLIENT)
 public class PacketSpyConfig {
     private static final Gson GSON = (new GsonBuilder()).setPrettyPrinting().create();
-    private static final File CONFIG_FILE = FabricLoader.getInstance().getConfigDir().resolve("packetspy.json").toFile();
+    private static final Path CONFIG_FILE = FabricLoader.getInstance().getConfigDir().resolve("packetspy.json");
 
-    public static List<String> silencedPackets = new ArrayList<>();
-    public static boolean logPlayerMovementPackets = true;
+    // Read on the network thread, changed from the WebSocket thread
+    public static final List<String> silencedPackets = new CopyOnWriteArrayList<>();
+    public static volatile boolean logPlayerMovementPackets = true;
     public static int httpServerPort = 8888;
     public static int webSocketPort = 8887;
+    /** When false the web UI is only reachable from this PC. Set to true to open it from a phone on the same network. */
+    public static boolean allowLanAccess = false;
 
     public static void load() {
-        if (CONFIG_FILE.exists()) {
-            try (FileReader reader = new FileReader(CONFIG_FILE)) {
+        if (Files.exists(CONFIG_FILE)) {
+            try (Reader reader = Files.newBufferedReader(CONFIG_FILE, StandardCharsets.UTF_8)) {
                 ConfigData data = GSON.fromJson(reader, ConfigData.class);
                 if (data != null) {
                     if (data.silencedPackets != null) {
-                        silencedPackets = data.silencedPackets;
+                        silencedPackets.clear();
+                        silencedPackets.addAll(data.silencedPackets);
                     }
                     logPlayerMovementPackets = data.logPlayerMovementPackets;
-                    httpServerPort = data.httpServerPort;
-                    webSocketPort = data.webSocketPort;
+                    httpServerPort = validPort(data.httpServerPort, 8888);
+                    webSocketPort = validPort(data.webSocketPort, 8887);
+                    allowLanAccess = data.allowLanAccess;
                 }
-            } catch (IOException e) {
-                PacketspyClient.LOGGER.error("Failed to load config", e);
+            } catch (Exception e) {
+                // Broken JSON must not crash the game; keep the file so the user can fix it
+                PacketspyClient.LOGGER.error("Failed to load config/packetspy.json, using defaults", e);
+                return;
             }
         }
+        // Creates the file on first start and adds options that are new in this version
+        save();
     }
 
-    public static void save() {
-        try (FileWriter writer = new FileWriter(CONFIG_FILE)) {
+    public static synchronized void save() {
+        try (Writer writer = Files.newBufferedWriter(CONFIG_FILE, StandardCharsets.UTF_8)) {
             ConfigData data = new ConfigData();
-            data.silencedPackets = silencedPackets;
+            data.silencedPackets = new ArrayList<>(silencedPackets);
             data.logPlayerMovementPackets = logPlayerMovementPackets;
             data.httpServerPort = httpServerPort;
             data.webSocketPort = webSocketPort;
+            data.allowLanAccess = allowLanAccess;
             GSON.toJson(data, writer);
         } catch (IOException e) {
             PacketspyClient.LOGGER.error("Failed to save config", e);
         }
+    }
+
+    private static int validPort(int port, int fallback) {
+        return port > 0 && port <= 65535 ? port : fallback;
     }
 
     private static class ConfigData {
@@ -59,6 +75,6 @@ public class PacketSpyConfig {
         boolean logPlayerMovementPackets = true;
         int httpServerPort = 8888;
         int webSocketPort = 8887;
+        boolean allowLanAccess = false;
     }
 }
-

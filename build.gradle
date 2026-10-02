@@ -1,9 +1,35 @@
+import groovy.json.JsonSlurper
+
+import java.util.zip.GZIPOutputStream
+import java.util.zip.ZipFile
+
 plugins {
-    id 'fabric-loom' version '1.14-SNAPSHOT'
-    id 'maven-publish'
+    // 1.21.x is obfuscated and needs the remapping plugin; 26.x ships with real names and uses the plain one.
+    id 'net.fabricmc.fabric-loom' version "${loom_version}" apply false
+    id 'net.fabricmc.fabric-loom-remap' version "${loom_version}" apply false
 }
 
-version = project.mod_version
+// ---------------------------------------------------------------------------
+// Target selection
+//   gradlew build -Ptarget=1.21.9-1.21.11            -> builds that jar
+//   gradlew compileClientJava -Ptarget=... -Pmc=1.21.10 -> compile check against another version of the target
+// ---------------------------------------------------------------------------
+def versionTable = new JsonSlurper().parse(file('versions.json'))
+def targetName = providers.gradleProperty('target').get()
+def target = versionTable.targets.find { it.name == targetName }
+if (target == null) {
+    throw new GradleException("Unknown target '${targetName}'. Pick one of: ${versionTable.targets*.name}")
+}
+def mcVersion = providers.gradleProperty('mc').getOrElse(target.versions[0])
+if (!target.versions.contains(mcVersion)) {
+    throw new GradleException("Minecraft ${mcVersion} is not part of target ${targetName}: ${target.versions}")
+}
+def mcInfo = versionTable.minecraft[mcVersion]
+boolean obfuscated = target.obfuscated
+
+apply plugin: obfuscated ? 'net.fabricmc.fabric-loom-remap' : 'net.fabricmc.fabric-loom'
+
+version = "${project.mod_version}+mc${target.name}"
 group = project.maven_group
 
 base {
@@ -21,154 +47,293 @@ loom {
     }
 }
 
-fabricApi {
-    configureDataGeneration {
-        client = true
-    }
-}
-
-repositories {
-    // Add repositories to retrieve artifacts from in here.
-    // You should only use this when depending on other mods because
-    // Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-    // See https://docs.gradle.org/current/userguide/declaring_repositories.html
-    // for more information about repositories.
-    maven {
-        name = "Modrinth"
-        url = "https://api.modrinth.com/maven"
-    }
-}
+// Small per-version classes for the few Minecraft APIs that changed between targets
+target.compat.each { sourceSets.client.java.srcDir("src/compat/${it}/java") }
 
 dependencies {
-    // To change the versions see the gradle.properties file
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    minecraft "com.mojang:minecraft:${mcVersion}"
+    if (obfuscated) {
+        mappings loom.officialMojangMappings()
+        modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+        modImplementation "net.fabricmc.fabric-api:fabric-api:${mcInfo.fabric_api}"
+    } else {
+        implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+        implementation "net.fabricmc.fabric-api:fabric-api:${mcInfo.fabric_api}"
+    }
 
     implementation "org.java-websocket:Java-WebSocket:${project.java_websocket_version}"
     include "org.java-websocket:Java-WebSocket:${project.java_websocket_version}"
-
-    // StackDeobf: Remaps stack traces and logs to allow readable names in production
-    // Using Project ID 'NusMqsjF' because Modrinth Maven metadata uses it
-    modImplementation "maven.modrinth:NusMqsjF:1.4.3"
-    include "maven.modrinth:NusMqsjF:1.4.3"
 }
 
-processResources {
-    inputs.property "version", project.version
-    inputs.property "minecraft_version", project.minecraft_version
-    inputs.property "loader_version", project.loader_version
-    filteringCharset "UTF-8"
+// ---------------------------------------------------------------------------
+// Name table: in the obfuscated game, classes and fields are called class_1234 / field_5678 / comp_9012.
+// We ship a compact intermediary -> Yarn table (Yarn is CC0) for every version of the target so the
+// web UI can show readable names without downloading anything at runtime.
+// ---------------------------------------------------------------------------
+if (obfuscated) {
+    def yarnConfigs = target.versions.collect { v ->
+        def conf = configurations.detachedConfiguration(
+                dependencies.create("net.fabricmc:yarn:${versionTable.minecraft[v].yarn}:v2"))
+        conf.transitive = false
+        conf
+    }
 
-    filesMatching("fabric.mod.json") {
-        expand "version": project.version,
-                "minecraft_version": project.minecraft_version,
-                "loader_version": project.loader_version
+    def nameTable = tasks.register('generateNameTable') {
+        description = 'Builds the intermediary -> Yarn name table bundled in obfuscated targets.'
+        def outputDir = layout.buildDirectory.dir('generated/nameTable')
+        inputs.files(yarnConfigs)
+        outputs.dir(outputDir)
+
+        doLast {
+            def classes = new TreeMap<Integer, String>()
+            def fields = new TreeMap<Integer, String>()
+            def components = new TreeMap<Integer, String>()
+
+            // Oldest version first, so names from newer Yarn builds win
+            yarnConfigs.each { conf ->
+                new ZipFile(conf.singleFile).withCloseable { zip ->
+                    zip.getInputStream(zip.getEntry('mappings/mappings.tiny')).withReader('UTF-8') { reader ->
+                        def header = reader.readLine().split('\t')
+                        int from = header.findIndexOf { it == 'intermediary' } - 3
+                        int to = header.findIndexOf { it == 'named' } - 3
+                        reader.eachLine { line ->
+                            if (line.startsWith('c\t')) {
+                                def parts = line.split('\t')
+                                def m = parts[1 + from] =~ /class_(\d+)$/
+                                if (m.find() && parts[1 + to] != parts[1 + from]) {
+                                    classes[m.group(1) as Integer] = parts[1 + to].replace('/', '.')
+                                }
+                            } else if (line.startsWith('\tf\t')) {
+                                def parts = line.split('\t')
+                                def m = parts[3 + from] =~ /^(field|comp)_(\d+)$/
+                                if (m.find() && parts[3 + to] != parts[3 + from]) {
+                                    (m.group(1) == 'field' ? fields : components)[m.group(2) as Integer] = parts[3 + to]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            def out = outputDir.get().file('packetspy/names.tsv.gz').asFile
+            out.parentFile.mkdirs()
+            new GZIPOutputStream(new FileOutputStream(out)).withWriter('UTF-8') { w ->
+                classes.each { k, v -> w << "c\t${k}\t${v}\n" }
+                fields.each { k, v -> w << "f\t${k}\t${v}\n" }
+                components.each { k, v -> w << "r\t${k}\t${v}\n" }
+            }
+        }
+    }
+
+    tasks.named('processClientResources', ProcessResources) {
+        from(nameTable)
     }
 }
 
-def targetJavaVersion = 21
+// ---------------------------------------------------------------------------
+// Resources / compilation
+// ---------------------------------------------------------------------------
+def modProps = [
+        version             : project.version,
+        minecraft_dependency: ">=${target.versions.first()} <=${target.versions.last()}",
+        loader_dependency   : target.loader,
+        java_version        : target.java,
+        mixin_java_level    : "JAVA_${target.java}",
+]
+
+tasks.withType(ProcessResources).configureEach {
+    inputs.properties(modProps)
+    filesMatching(['fabric.mod.json', '*.mixins.json']) {
+        expand(modProps)
+    }
+}
+
 tasks.withType(JavaCompile).configureEach {
     // ensure that the encoding is set to UTF-8, no matter what the system default is
-    // this fixes some edge cases with special characters not displaying correctly
-    // see http://yodaconditions.net/blog/fix-for-java-file-encoding-problems-with-gradle.html
-    // If Javadoc is generated, this must be specified in that task too.
-    it.options.encoding = "UTF-8"
-    if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
-        it.options.release.set(targetJavaVersion)
-    }
+    it.options.encoding = 'UTF-8'
+    it.options.release = target.java as Integer
 }
 
 java {
-    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
-    if (JavaVersion.current() < javaVersion) {
-        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
-    }
-    // Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
-    // if it is present.
-    // If you remove this line, sources will not be generated.
-    withSourcesJar()
+    sourceCompatibility = JavaVersion.toVersion(target.java)
+    targetCompatibility = JavaVersion.toVersion(target.java)
 }
 
 jar {
-    from("LICENSE") {
-        rename { "${it}_${project.archivesBaseName}" }
+    from('LICENSE.txt') {
+        rename { "LICENSE_${project.archives_base_name}.txt" }
     }
 }
 
-// configure the maven publication
-publishing {
-    publications {
-        create("mavenJava", MavenPublication) {
-            artifactId = project.archives_base_name
-            from components.java
-        }
-    }
+def modJar = obfuscated ? tasks.named('remapJar') : tasks.named('jar')
 
-    // See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
-    repositories {
-        // Add repositories to publish to here.
-        // Notice: This block does NOT have the same function as the block in the top level.
-        // The repositories here will be used for publishing your artifact, not for
-        // retrieving dependencies.
-    }
+tasks.register('releaseJar', Copy) {
+    group = 'build'
+    description = 'Builds the jar for the selected target and copies it into release/.'
+    from(modJar)
+    into(layout.projectDirectory.dir('release'))
 }
 
-tasks.register('printKeyBindingConstructors') {
+// ---------------------------------------------------------------------------
+// Binary check: "it compiles against 1.21.8" is not enough, because Minecraft's obfuscated names can
+// change between versions even when the readable names don't (Packet.type() did in 1.21.4).
+//   gradlew verifyJar -Ptarget=1.21-1.21.8 -Pmc=1.21.8
+// checks that every Minecraft class, method and field used by release/<this target's jar> (built
+// against the target's first version) exists in the Minecraft version selected with -Pmc.
+// ---------------------------------------------------------------------------
+tasks.register('verifyJar') {
+    group = 'verification'
+    description = "Checks that the target's release jar only uses Minecraft code that exists in -Pmc."
+    def jarFile = layout.projectDirectory.file("release/${project.archives_base_name}-${project.version}.jar").asFile
+    def loomExtension = net.fabricmc.loom.LoomGradleExtension.get(project)
+
     doLast {
-        def keyBindingClass = null
-        try {
-            // Try to load the class from the client compile classpath
-            def urls = sourceSets.client.compileClasspath.files.collect { it.toURI().toURL() }
-            def loader = new URLClassLoader(urls as URL[], getClass().getClassLoader())
-            keyBindingClass = loader.loadClass("net.minecraft.client.option.KeyBinding")
-        } catch (Exception e) {
-            println "Could not load KeyBinding class: ${e.message}"
+        if (!jarFile.exists()) {
+            throw new GradleException("${jarFile} not found, run releaseJar for this target first")
+        }
+        def mcJars = loomExtension.getMinecraftJars(loomExtension.productionNamespaceEnum.get()).collect { new ZipFile(it.toFile()) }
+        def classCache = [:]
+        def readClass = { String name ->
+            if (!classCache.containsKey(name)) {
+                def node = null
+                for (zip in mcJars) {
+                    def entry = zip.getEntry(name + '.class')
+                    if (entry != null) {
+                        node = new org.objectweb.asm.tree.ClassNode()
+                        zip.getInputStream(entry).withCloseable { new org.objectweb.asm.ClassReader(it).accept(node, org.objectweb.asm.ClassReader.SKIP_CODE) }
+                        break
+                    }
+                }
+                classCache[name] = node
+            }
+            classCache[name]
+        }
+        // Looks for a member in the class, its superclasses and interfaces. JDK classes are checked with
+        // reflection; other libraries (Netty, ...) can't be checked here and only count as having the
+        // member if its name isn't an obfuscated Minecraft name.
+        def hasMember
+        hasMember = { String owner, String name, String desc, boolean field ->
+            def node = readClass(owner)
+            if (node == null) {
+                if (owner.startsWith('java/')) {
+                    try {
+                        def type = Class.forName(owner.replace('/', '.'), false, ClassLoader.getPlatformClassLoader())
+                        def all = []
+                        for (def c = type; c != null; c = c.superclass) {
+                            all += field ? c.declaredFields.toList() : c.declaredMethods.toList()
+                        }
+                        all += field ? type.fields.toList() : type.methods.toList()
+                        return all.any {
+                            it.name == name && (field ? org.objectweb.asm.Type.getDescriptor(it.type) : org.objectweb.asm.Type.getMethodDescriptor(it)) == desc
+                        }
+                    } catch (ClassNotFoundException ignored) {
+                        return true
+                    }
+                }
+                return !(name ==~ /(method|field|comp)_\d+/)
+            }
+            def members = field ? node.fields : node.methods
+            if (members.any { it.name == name && it.desc == desc }) return true
+            def parents = (node.superName ? [node.superName] : []) + node.interfaces
+            parents.any { hasMember(it, name, desc, field) }
         }
 
-        if (keyBindingClass) {
-            println "Constructors for KeyBinding:"
-            keyBindingClass.constructors.each { c ->
-                println c
-            }
-
-            // Also check for inner classes
-            println "Inner classes:"
-            keyBindingClass.declaredClasses.each { cls ->
-                println cls.name
+        def isMinecraft = { String owner -> owner.startsWith('net/minecraft/') || owner.startsWith('com/mojang/') }
+        def problems = new TreeSet<String>()
+        def checkType = { org.objectweb.asm.Type type ->
+            while (type.sort == org.objectweb.asm.Type.ARRAY) type = type.elementType
+            if (type.sort == org.objectweb.asm.Type.OBJECT && isMinecraft(type.internalName) && readClass(type.internalName) == null) {
+                problems << "missing class ${type.internalName}"
             }
         }
+        def checkMember = { String owner, String name, String desc, boolean field, String user ->
+            if (owner.startsWith('[') || !isMinecraft(owner)) return
+            if (readClass(owner) == null) {
+                problems << "missing class ${owner} (used by ${user})"
+            } else if (!hasMember(owner, name, desc, field)) {
+                problems << "missing ${field ? 'field' : 'method'} ${owner}.${name}${desc} (used by ${user})"
+            }
+        }
+
+        new ZipFile(jarFile).withCloseable { modZip ->
+            modZip.entries().findAll { it.name.startsWith('org/ander507/') && it.name.endsWith('.class') }.each { entry ->
+                def node = new org.objectweb.asm.tree.ClassNode()
+                modZip.getInputStream(entry).withCloseable { new org.objectweb.asm.ClassReader(it).accept(node, 0) }
+                ([node.superName] + node.interfaces).findAll { it }.each { checkType(org.objectweb.asm.Type.getObjectType(it)) }
+                node.fields.each { checkType(org.objectweb.asm.Type.getType(it.desc)) }
+                node.methods.each { method ->
+                    org.objectweb.asm.Type.getArgumentTypes(method.desc).each { checkType(it) }
+                    checkType(org.objectweb.asm.Type.getReturnType(method.desc))
+                    method.instructions.each { insn ->
+                        if (insn instanceof org.objectweb.asm.tree.MethodInsnNode) {
+                            checkMember(insn.owner, insn.name, insn.desc, false, node.name)
+                        } else if (insn instanceof org.objectweb.asm.tree.FieldInsnNode) {
+                            checkMember(insn.owner, insn.name, insn.desc, true, node.name)
+                        } else if (insn instanceof org.objectweb.asm.tree.TypeInsnNode) {
+                            checkType(org.objectweb.asm.Type.getObjectType(insn.desc))
+                        } else if (insn instanceof org.objectweb.asm.tree.LdcInsnNode && insn.cst instanceof org.objectweb.asm.Type) {
+                            checkType(insn.cst)
+                        } else if (insn instanceof org.objectweb.asm.tree.InvokeDynamicInsnNode) {
+                            insn.bsmArgs.findAll { it instanceof org.objectweb.asm.Handle }.each { org.objectweb.asm.Handle h ->
+                                checkMember(h.owner, h.name, h.desc, h.tag <= org.objectweb.asm.Opcodes.H_PUTSTATIC, node.name)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Mixin targets (obfuscated jars keep them in the refmap; unobfuscated ones by name)
+            def refmapEntry = modZip.entries().find { it.name.endsWith('refmap.json') }
+            if (refmapEntry != null) {
+                def refmap = new JsonSlurper().parse(modZip.getInputStream(refmapEntry))
+                refmap.mappings.each { mixin, refs ->
+                    refs.values().each { String ref ->
+                        def m = ref =~ /^L([^;]+);([^(:]+)(\(.*)$/
+                        if (m.matches()) checkMember(m.group(1), m.group(2), m.group(3), false, mixin)
+                    }
+                }
+            }
+        }
+        mcJars.each { it.close() }
+
+        if (!problems.isEmpty()) {
+            throw new GradleException("${jarFile.name} will not work on Minecraft ${mcVersion}:\n  " + problems.join('\n  '))
+        }
+        logger.lifecycle("${jarFile.name} is compatible with Minecraft ${mcVersion}")
     }
 }
 
-tasks.register('printKeyBindingFields') {
-    doLast {
-        def keyBindingClass = null
-        def categoryClass = null
-        try {
-            // Try to load the class from the client compile classpath
-            def urls = sourceSets.client.compileClasspath.files.collect { it.toURI().toURL() }
-            def loader = new URLClassLoader(urls as URL[], getClass().getClassLoader())
-            keyBindingClass = loader.loadClass("net.minecraft.client.option.KeyBinding")
-            categoryClass = loader.loadClass("net.minecraft.client.option.KeyBinding\$Category")
-        } catch (Exception e) {
-            println "Could not load classes: ${e.message}"
-        }
-
-        if (keyBindingClass) {
-            println "Static fields in KeyBinding:"
-            keyBindingClass.declaredFields.findAll { java.lang.reflect.Modifier.isStatic(it.modifiers) }.each { f ->
-                println "${f.type.name} ${f.name}"
-            }
-        }
-
-        if (categoryClass) {
-            println "Static fields in KeyBinding\$Category:"
-            categoryClass.declaredFields.findAll { java.lang.reflect.Modifier.isStatic(it.modifiers) }.each { f ->
-                println "${f.type.name} ${f.name}"
-            }
-        }
+// ---------------------------------------------------------------------------
+// Testing in a real (production) game
+//   gradlew prodServer -Ptarget=... -Pmc=1.21.3              -> offline-mode server on localhost:25565
+//   gradlew prodClient -Ptarget=... -Pmc=1.21.3 -Pjoin=localhost:25565
+//   -PmodJar=path/to.jar tests a different PacketSpy jar
+// ---------------------------------------------------------------------------
+dependencies {
+    // Loaded next to PacketSpy by the prod* tasks (which also add this build's jar on their own)
+    productionRuntimeMods("net.fabricmc.fabric-api:fabric-api:${mcInfo.fabric_api}") {
+        transitive = false
     }
+}
+
+tasks.register('prodClient', net.fabricmc.loom.task.prod.ClientProductionRunTask) {
+    group = 'packetspy testing'
+    def jarOverride = providers.gradleProperty('modJar')
+    if (jarOverride.present) {
+        // Test a different PacketSpy jar (e.g. an old release) instead of this build's
+        mods.setFrom(file(jarOverride.get()), configurations.productionRuntimeMods)
+    }
+    runDir = file("run/prod-client-${mcVersion}")
+    def join = providers.gradleProperty('join')
+    if (join.present) {
+        programArgs.addAll('--quickPlayMultiplayer', join.get())
+    }
+}
+
+tasks.register('prodServer', net.fabricmc.loom.task.prod.ServerProductionRunTask) {
+    group = 'packetspy testing'
+    minecraftVersion = mcVersion
+    loaderVersion = project.loader_version
+    installerVersion = '1.1.2'
+    runDir = file("run/prod-server-${mcVersion}")
 }
