@@ -23,6 +23,7 @@ This README is the main reference for the project, written so that a person or a
 | Config | `config/packetspy.json` |
 | Key binding | F12, `key.packetspy.open_web_ui` |
 | Main package | `org.ander507.packetspy` |
+| License | MIT for the code; icon and screenshots © Ander507 (see "License and credits") |
 
 ---
 
@@ -259,3 +260,13 @@ One self-contained file: no frameworks, no web fonts, no network requests beside
 3. Start the game and press **F12**.
 
 To view from a phone on the same network, set `"allowLanAccess": true` in `config/packetspy.json`, restart, and open the address printed in the game log (`>> Mobile : http://192.168.x.x:8888`).
+
+---
+
+## License and credits
+
+* **Code:** MIT, see `LICENSE.txt`.
+* **Icon and screenshots** (`src/client/resources/assets/packetspy/icon.png`, `screenshots/`): © Ander507, all rights reserved. They are not covered by the MIT license.
+* **[Java-WebSocket](https://github.com/TooTallNate/Java-WebSocket)** by Nathan Rajlich, MIT. Bundled in the jar; its license is included as `META-INF/licenses/Java-WebSocket-LICENSE.txt`.
+* **[Yarn](https://github.com/FabricMC/yarn)** mappings (CC0) are used at build time to create the readable-name table in the 1.21.x jars.
+* **How it was made:** idea, direction and testing by Ander507; most of the code was written with an AI assistant (Claude). This is also disclosed on the Modrinth page.

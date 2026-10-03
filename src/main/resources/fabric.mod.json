@@ -4,9 +4,12 @@
   "version": "${version}",
   "name": "PacketSpy",
   "description": "This adds console / log to spy on packets",
-  "authors": [],
-  "contact": {},
-  "license": "All-Rights-Reserved",
+  "authors": ["Ander507"],
+  "contact": {
+    "sources": "https://github.com/Ander507/PacketSpy",
+    "issues": "https://github.com/Ander507/PacketSpy/issues"
+  },
+  "license": "MIT",
   "icon": "assets/packetspy/icon.png",
   "environment": "client",
   "entrypoints": {
